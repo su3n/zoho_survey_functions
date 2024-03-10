@@ -1,0 +1,197 @@
+// ╔═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ║
+// ║ This function calculates the average of the ratings and writes a comment for the ticket
+// ║
+// ╚═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+settings = Map();
+information = Map();
+// ═════ General Information ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// Mainly for logging
+information.put("creatorName","Doe, John");
+information.put("creationDate","2024-03-10");
+information.put("surveyData",survey);
+// ═════ General settings ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// Change the TLD according to the Zoho Data Center used [.com, .eu, .in, .com.cn, .com.au, .jp]
+settings.put("zohoDeskApiBaseUrl","https://desk.zoho.eu/api/v1/");
+// A connection is required that has at least this scopes: Desk.tickets.READ, Desk.basic.READ, Desk.tickets.UPDATE (can be created under Settings > Developer Space > Connections)
+settings.put("zohoDeskConnectionName","CHANGE_ME");
+// ═════ Survey settings ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+settings.put("ticketIdFieldName","CHANGE_ME");
+settings.put("ticketIdUrlParamName","CHANGE_ME");
+// ═════ Ticket settings ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+settings.put("zohoDeskCustomFieldName","CHANGE_ME");
+// ═════ Comment settings ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+settings.put("commentIsPublic",false);
+settings.put("commentContentPrefix","CHANGE_ME");
+settings.put("tableHeaderTextKey","CHANGE_ME");
+settings.put("tableHeaderTextValue","CHANGE_ME");
+// ═════ Error handling settings ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+settings.put("sendMailOnErrors",true);
+// Comma separated list of emails possible
+settings.put("emailRecipients","CHANGE_ME");
+// ═════ Vars ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+errors = List();
+// ═════ Ugly workaround ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// In the invokeurl task, no connection can be specified by reading the value from a map, so these values must be stored separately into a variable, then it works...
+zohoDeskConnectionNameHelper = settings.get("zohoDeskConnectionName").toString();
+// ═════ Process survey data ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+try 
+{
+	ticketId = 0;
+	ratingNumbers = Map();
+	ratingAll = Map();
+	commentContent = settings.get("commentContentPrefix");
+	commentContent = commentContent + "<table border='1' style='border-collapse: collapse; font-family: Arial, sans-serif; border: 2px solid #dddddd;'><tr><th>" + settings.get("tableHeaderTextKey") + "</th><th>" + settings.get("tableHeaderTextValue") + "</th></tr>";
+	questions = survey.get("question");
+	qKeys = questions.keys();
+	// Filter the survey fields and generate the text for the comment
+	for each  k in qKeys
+	{
+		if(questions.get(k).get("msg").equalsIgnoreCase(settings.get("ticketIdFieldName")) || questions.get(k).get("msg").equalsIgnoreCase(settings.get("ticketIdUrlParamName")))
+		{
+			ticketId = questions.get(k).get("response");
+			continue;
+		}
+		if(questions.get(k).get("response").isNumber())
+		{
+			ratingNumbers.put(questions.get(k).get("msg"),questions.get(k).get("response").toNumber());
+		}
+		commentContent = commentContent + "<tr><td>" + questions.get(k).get("msg") + "</td><td>" + questions.get(k).get("response") + "</td></tr>";
+	}
+	commentContent = commentContent + "</table>";
+	// Calc AVG
+	sum = 0;
+	avg = 0;
+	for each  num in ratingNumbers
+	{
+		sum = sum + num;
+	}
+	avg = sum / ratingNumbers.size();
+	// Info the results for the deluge log
+	info "AVG: " + avg;
+	info "Comment: " + commentContent;
+}
+catch (e)
+{
+	errors.add("Error occured on: Process survey data | " + e);
+}
+// ═════ Create ticket comment ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+try 
+{
+	// Initial error check
+	if(errors.size() > 0)
+	{
+		throws "Skipped due to a previous error!";
+	}
+	createTicketCommentData = Map();
+	createTicketCommentData.put("content",commentContent);
+	createTicketCommentData.put("isPublic",settings.get("commentIsPublic"));
+	createTicketCommentResponse = invokeurl
+	[
+		url :settings.get("zohoDeskApiBaseUrl") + "tickets/" + ticketId + "/comments"
+		type :POST
+		parameters:createTicketCommentData.toString()
+		connection:zohoDeskConnectionNameHelper
+	];
+	info createTicketCommentResponse;
+	// The response of the API must be checked, because a problem here does not throw an error
+	if(!createTicketCommentResponse.get("errorCode").isNull())
+	{
+		errors.add("createTicketCommentResponse: " + createTicketCommentResponse);
+		throws "Error occured on: Commenting Ticket via API Call";
+	}
+}
+catch (e)
+{
+	errors.add("Error occured on: Commenting Ticket | " + e);
+}
+// ═════ Update ticket ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+try 
+{
+	// Initial error check
+	if(errors.size() > 0)
+	{
+		throws "Skipped due to a previous error!";
+	}
+	updateTicketCommentData = Map();
+	updateTicketCommentData.put("cf",('{"' + settings.get("zohoDeskCustomFieldName")) + '":"' + avg.toString() + '"}');
+	updateTicketCommentResponse = invokeurl
+	[
+		url :settings.get("zohoDeskApiBaseUrl") + "tickets/" + ticketId
+		type :PATCH
+		parameters:updateTicketCommentData.toString()
+		connection:zohoDeskConnectionNameHelper
+	];
+	info updateTicketCommentResponse;
+	// The response of the API must be checked, because a problem here does not throw an error
+	if(!updateTicketCommentResponse.get("errorCode").isNull())
+	{
+		errors.add("updateTicketCommentResponse: " + updateTicketCommentResponse);
+		throws "Error occured on: Updating Ticket via API Call";
+	}
+}
+catch (e)
+{
+	errors.add("Error occured on: Updating Ticket | " + e);
+}
+// ═════ mail notification ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+if(settings.get("sendMailOnErrors") && errors.size() > 0)
+{
+	// ╔══════════════════════════════════════════════════════════════════════════╗
+	// ║ Todo:                                                                    ║
+	// ║ 1. Simplify the table generation by reducing repetitive code.            ║
+	// ║ 2. Streamline the email body generation process for better clarity.      ║
+	// ╚══════════════════════════════════════════════════════════════════════════╝
+	// Templates for the email body
+	mailBody = "";
+	styles = "";
+	htmlTableGeneralStyle = 'table {font-family:Arial,Helvetica,sans-serif; border-collapse: collapse; width:100%} td,th {border:1px solid #ddd; padding:8px} tr:nth-child(even) {background-color:#ddd}';
+	htmlTableCustomStyle = '#${id} th{padding-top:12px;padding-bottom:12px;text-align:left;background-color:${backgroundColor};color:${fontColor}}';
+	htmlTable1ColumnsTemplate = '<table id=${id}><tr><th>${headerColumn1}</th></tr>${rows}</table>';
+	htmlTable2ColumnsTemplate = '<table id=${id}><tr><th>${headerColumn1}</th><th>${headerColumn2}</th></tr></tr>${rows}</table>';
+	// Information Table
+	informationTableId = "srt0";
+	styles = styles + htmlTableCustomStyle.replaceAll("${id}",informationTableId,true).replaceAll("${backgroundColor}","#4bc467",true).replaceAll("${fontColor}","#fff",true);
+	informationTable = htmlTable2ColumnsTemplate.replaceAll("${id}",informationTableId,true).replaceAll("${headerColumn1}","Key",true).replaceAll("${headerColumn2}","Value",true);
+	informationMapKeys = information.keys();
+	counterHelper = 0;
+	informationRows = "";
+	for each  elm in information
+	{
+		informationRows = informationRows + "<tr><td>" + informationMapKeys.get(counterHelper) + "</td><td>" + elm + "</td></tr>";
+		counterHelper = counterHelper + 1;
+	}
+	mailBody = mailBody + "<h2>Information</h2>" + informationTable.replaceAll("${rows}",informationRows,true);
+	// Settings Table
+	settingsTableId = "srt2";
+	styles = styles + htmlTableCustomStyle.replaceAll("${id}",settingsTableId,true).replaceAll("${backgroundColor}","#b38f5d",true).replaceAll("${fontColor}","#fff",true);
+	settingsTable = htmlTable2ColumnsTemplate.replaceAll("${id}",settingsTableId,true).replaceAll("${headerColumn1}","Key",true).replaceAll("${headerColumn2}","Value",true);
+	settingsMapKeys = settings.keys();
+	counterHelper = 0;
+	settingsRows = "";
+	for each  setting in settings
+	{
+		settingsRows = settingsRows + "<tr><td>" + settingsMapKeys.get(counterHelper) + "</td><td>" + setting + "</td></tr>";
+		counterHelper = counterHelper + 1;
+	}
+	mailBody = mailBody + "<h2>Settings</h2>" + settingsTable.replaceAll("${rows}",settingsRows,true);
+	// Error Table
+	errorTableId = "srt3";
+	styles = styles + htmlTableCustomStyle.replaceAll("${id}",errorTableId,true).replaceAll("${backgroundColor}","#9e3737",true).replaceAll("${fontColor}","#fff",true);
+	errorTable = htmlTable1ColumnsTemplate.replaceAll("${id}",errorTableId,true).replaceAll("${headerColumn1}","Error",true);
+	errorRows = "";
+	for each  error in errors
+	{
+		errorRows = errorRows + "<tr><td>" + error + "</td></tr>";
+	}
+	mailBody = mailBody + "<h2>Errors</h2>" + errorTable.replaceAll("${rows}",errorRows,true);
+	// Styles
+	mailBody = "<style>" + htmlTableGeneralStyle + styles + "</style>" + mailBody;
+	sendmail
+	[
+		from :zoho.adminuserid
+		to :settings.get("emailRecipients")
+		subject :"⚠️ An error occurred when executing a custom function inside zoho survey"
+		message :mailBody
+	]
+}
