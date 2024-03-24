@@ -16,7 +16,6 @@ settings.put("zohoDeskApiBaseUrl","https://desk.zoho.eu/api/v1/");
 // A connection is required that has at least this scopes: Desk.tickets.READ, Desk.basic.READ, Desk.tickets.UPDATE (can be created under Settings > Developer Space > Connections)
 settings.put("zohoDeskConnectionName","CHANGE_ME");
 // ═════ Survey settings ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
-settings.put("ticketIdFieldName","CHANGE_ME");
 settings.put("ticketIdUrlParamName","CHANGE_ME");
 // ═════ Ticket settings ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 settings.put("zohoDeskCustomFieldName","CHANGE_ME");
@@ -47,7 +46,7 @@ try
 	// Filter the survey fields and generate the text for the comment
 	for each  k in qKeys
 	{
-		if(questions.get(k).get("msg").equalsIgnoreCase(settings.get("ticketIdFieldName")) || questions.get(k).get("msg").equalsIgnoreCase(settings.get("ticketIdUrlParamName")))
+		if(questions.get(k).get("msg").equalsIgnoreCase(settings.get("ticketIdUrlParamName")))
 		{
 			ticketId = questions.get(k).get("response");
 			continue;
